@@ -54,7 +54,19 @@ export default function ActivePassScreen() {
             <Text className="text-slate-900 text-sm font-semibold mb-3">Show this QR at the gate</Text>
             <View className="p-4 bg-white rounded-2xl shadow-sm">
               <QRCode
-                value={activePass.signature || JSON.stringify({ id: activePass.id, rollNumber: activePass.rollNumber })}
+                value={
+                  activePass.signature ||
+                  JSON.stringify({
+                    passId: activePass.id,
+                    studentId: activePass.studentId || 'student-1',
+                    rollNumber: activePass.rollNumber || 'UNKNOWN',
+                    studentName: activePass.studentName || 'Student',
+                    destination: activePass.destination || 'Gate',
+                    validFrom: activePass.validFrom,
+                    validUntil: activePass.validUntil,
+                    version: 1,
+                  })
+                }
                 size={240}
                 color="#0f172a"
                 backgroundColor="#ffffff"

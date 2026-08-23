@@ -86,7 +86,19 @@ export default function CreatePassScreen() {
             <Text className="text-slate-900 text-sm font-semibold mb-3">Show this QR at the gate</Text>
             <View className="p-4 bg-white rounded-2xl shadow-sm">
               <QRCode
-                value={created.signature || JSON.stringify({ id: created.id, rollNumber: created.rollNumber, destination: created.destination })}
+                value={
+                  created.signature ||
+                  JSON.stringify({
+                    passId: created.id,
+                    studentId: profile?.id || 'student-1',
+                    rollNumber: created.rollNumber || 'UNKNOWN',
+                    studentName: created.studentName || 'Student',
+                    destination: created.destination || 'Gate',
+                    validFrom: created.validFrom,
+                    validUntil: created.validUntil,
+                    version: 1,
+                  })
+                }
                 size={240}
                 color="#0f172a"
                 backgroundColor="#ffffff"
