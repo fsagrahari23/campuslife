@@ -65,6 +65,12 @@ export async function verifyPass(
     } catch {
       return { valid: true, payload };
     }
+  } catch (error) {
+    return {
+      valid: false,
+      error: `Verification error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    };
+  }
 }
 
 /**
