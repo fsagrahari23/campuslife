@@ -16,5 +16,8 @@
     "db:seed": "npm run seed --workspace=server",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.3.0"
   }
 }

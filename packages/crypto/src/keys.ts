@@ -5,7 +5,11 @@
  */
 
 import * as ed from '@noble/ed25519';
+import { sha512 } from '@noble/hashes/sha512';
 import { bytesToHex, hexToBytes, toBase64, fromBase64 } from './encoding';
+
+ed.etc.sha512Sync = (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
+ed.etc.sha512Async = (...m: Uint8Array[]) => Promise.resolve(ed.etc.sha512Sync(...m));
 
 export interface KeyPair {
   privateKey: string; // hex-encoded
