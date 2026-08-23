@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Gate Pass Guard",
+    "slug": "gatepass-guard",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "gatepass-guard",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "edu.campus.gatepass.guard",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Gate Pass Guard needs camera access to scan student gate pass QR codes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f172a",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "edu.campus.gatepass.guard",
+      "permissions": ["CAMERA"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-camera",
+      "expo-secure-store",
+      "expo-sqlite"
+    ]
+  }
+}

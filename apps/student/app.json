@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Gate Pass Student",
+    "slug": "gatepass-student",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "gatepass-student",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "edu.campus.gatepass.student"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f172a",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "edu.campus.gatepass.student"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-sqlite"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "564c63d9-ec9d-49a7-80bd-ab83dc37e2b8"
+      }
+    }
+  }
+}
