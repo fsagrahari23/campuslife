@@ -7,5 +7,7 @@ dist/
 *.log
 coverage/
 .turbo/
+**/android/
+**/ios/
 android/
 ios/
