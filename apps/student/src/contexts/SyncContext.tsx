@@ -4,8 +4,8 @@ import { useDatabase } from './DatabaseContext';
 import { useAuth } from './AuthContext';
 import { CreateGatePassRequest, QRPayload } from '@gatepass/shared-types';
 import { signPass, encodeQRPayload } from '@gatepass/crypto';
+import { API_URL } from '../constants/api';
 
-const API_URL = 'http://localhost:3000/api';
 const DEV_SIGNING_KEY = '857a0d97035bf81b3a8cfee97271980d63402b7e97063d139ff290bd33fb2fc0';
 
 // Generate a simple UUID v4
@@ -43,8 +43,8 @@ export function useSync() {
 
 export function SyncProvider({ children }: { children: ReactNode }) {
   const { db, isReady } = useDatabase();
-  const { getToken, profile } = useAuth();
-  const [isOnline, setIsOnline] = useState(false);
+  const { getToken, profile, isAuthenticated } = useAuth();
+  const [isOnline, setIsOnline] = useState(true);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [passes, setPasses] = useState<any[]>([]);
@@ -54,15 +54,19 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const checkNetwork = async () => {
       try {
+        if (Platform.OS === 'web' && typeof navigator !== 'undefined') {
+          setIsOnline(navigator.onLine !== false);
+          return;
+        }
         const state = await Network.getNetworkStateAsync();
         setIsOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
       } catch {
-        setIsOnline(false);
+        setIsOnline(true);
       }
     };
 
     checkNetwork();
-    const interval = setInterval(checkNetwork, 5000);
+    const interval = setInterval(checkNetwork, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -72,14 +76,20 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       loadPasses();
       loadPendingCount();
     }
-  }, [isReady, db]);
+  }, [isReady, db, profile]);
 
-  // Auto-sync when coming online
+  // Auto-sync when coming online, when logging in, and periodically every 5 seconds
   useEffect(() => {
-    if (isOnline && isReady && db) {
+    if (isReady && db && isAuthenticated) {
       syncNow();
+      const interval = setInterval(() => {
+        if (isOnline) {
+          syncNow();
+        }
+      }, 5000);
+      return () => clearInterval(interval);
     }
-  }, [isOnline, isReady]);
+  }, [isOnline, isReady, db, isAuthenticated]);
 
   const loadPasses = async () => {
     if (!db) return;
@@ -153,8 +163,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     // Add to outbox
     await db.runAsync(
       `INSERT INTO outbox_events (id, event_id, event_type, aggregate_id, payload, sync_status, created_at)
-       VALUES (?, ?, 'GATE_PASS_CREATED', ?, ?, 'PENDING', ?)`,
-      [generateUUID(), eventId, id, JSON.stringify({ ...data, studentId: profile?.id, status: 'APPROVED', signature: signatureStr }), now]
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [generateUUID(), eventId, 'GATE_PASS_CREATED', id, JSON.stringify({ ...data, studentId: profile?.id, status: 'APPROVED', signature: signatureStr }), 'PENDING', now]
     );
 
     await loadPasses();
@@ -169,6 +179,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'ngrok-skip-browser-warning': 'true',
               Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify(data),
@@ -225,19 +236,30 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
       if (pendingEvents.length > 0) {
         const deviceId = 'student-device-' + (profile?.id || 'unknown');
-        const events = pendingEvents.map((e: any) => ({
-          eventId: e.event_id,
-          eventType: e.event_type,
-          aggregateId: e.aggregate_id,
-          payload: JSON.parse(e.payload),
-          timestamp: e.created_at,
-        }));
+        const events = pendingEvents.map((e: any) => {
+          let payload = e.payload;
+          if (typeof payload === 'string') {
+            try {
+              payload = JSON.parse(payload);
+            } catch {
+              // keep as is if string
+            }
+          }
+          return {
+            eventId: e.event_id,
+            eventType: e.event_type,
+            aggregateId: e.aggregate_id,
+            payload: typeof payload === 'object' && payload !== null ? payload : { raw: payload },
+            timestamp: e.created_at,
+          };
+        });
 
         try {
           const pushResponse = await fetch(`${API_URL}/sync/push`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'ngrok-skip-browser-warning': 'true',
               Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify({ deviceId, events }),
@@ -269,6 +291,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({

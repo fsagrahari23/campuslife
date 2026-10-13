@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, Platform, ScrollView } from 'react-native';
+import { useState, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, Platform, ScrollView, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
 import { useSync } from '../../src/contexts/SyncContext';
@@ -7,23 +7,30 @@ import { useSync } from '../../src/contexts/SyncContext';
 export default function IncomingScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [manualQR, setManualQR] = useState('');
+  const isScanningRef = useRef(false);
   const { processScan } = useSync();
 
   const handleScan = async ({ data }: { data: string }) => {
-    if (scanned) return;
+    if (isScanningRef.current || scanned) return;
+    isScanningRef.current = true;
     setScanned(true);
+    setProcessing(true);
+
     try {
       const scanResult = await processScan(data, 'INCOMING');
       setResult(scanResult);
     } catch (error) {
       setResult({ valid: false, errorMessage: error instanceof Error ? error.message : 'Scan failed' });
+    } finally {
+      setProcessing(false);
     }
   };
 
   const handleManualScan = () => {
-    if (!manualQR.trim()) return;
+    if (!manualQR.trim() || isScanningRef.current) return;
     handleScan({ data: manualQR.trim() });
   };
 
@@ -94,7 +101,15 @@ export default function IncomingScanScreen() {
           )}
 
           <View className="flex-row gap-3 w-full mt-2">
-            <TouchableOpacity className="flex-1 bg-slate-700 rounded-xl py-3 items-center" onPress={() => { setScanned(false); setResult(null); }}>
+            <TouchableOpacity
+              className="flex-1 bg-slate-700 rounded-xl py-3 items-center"
+              onPress={() => {
+                isScanningRef.current = false;
+                setScanned(false);
+                setResult(null);
+                setManualQR('');
+              }}
+            >
               <Text className="text-white font-semibold">Scan Again</Text>
             </TouchableOpacity>
             <TouchableOpacity className="flex-1 bg-slate-600 rounded-xl py-3 items-center" onPress={() => router.back()}>
@@ -128,8 +143,12 @@ export default function IncomingScanScreen() {
       />
 
       <View className="absolute inset-0 items-center justify-center">
-        <View className="w-64 h-64 border-2 border-white/50 rounded-3xl" />
-        <Text className="text-white/70 mt-4 text-sm">Point camera at student's QR code</Text>
+        <View className="w-64 h-64 border-2 border-white/50 rounded-3xl items-center justify-center">
+          {processing && <ActivityIndicator size="large" color="#22c55e" />}
+        </View>
+        <Text className="text-white/70 mt-4 text-sm">
+          {processing ? 'Verifying signature...' : "Point camera at student's QR code"}
+        </Text>
       </View>
     </View>
   );

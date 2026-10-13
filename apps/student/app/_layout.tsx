@@ -1,10 +1,44 @@
 import 'react-native-get-random-values';
 import '../global.css';
-import { Stack } from 'expo-router';
+import { Stack, router, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { AuthProvider } from '../src/contexts/AuthContext';
+import { useEffect } from 'react';
+import { View, ActivityIndicator } from 'react-native';
+import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { DatabaseProvider } from '../src/contexts/DatabaseContext';
 import { SyncProvider } from '../src/contexts/SyncContext';
+
+function NavigationGate() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const segments = useSegments();
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    const inAuthGroup = segments[0] === '(auth)';
+
+    if (!isAuthenticated && !inAuthGroup) {
+      router.replace('/(auth)/login');
+    } else if (isAuthenticated && inAuthGroup) {
+      router.replace('/(tabs)');
+    }
+  }, [isAuthenticated, isLoading, segments]);
+
+  if (isLoading) {
+    return (
+      <View className="flex-1 bg-slate-900 items-center justify-center">
+        <ActivityIndicator size="large" color="#6366f1" />
+      </View>
+    );
+  }
+
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="(tabs)" />
+    </Stack>
+  );
+}
 
 export default function RootLayout() {
   return (
@@ -12,10 +46,7 @@ export default function RootLayout() {
       <AuthProvider>
         <SyncProvider>
           <StatusBar style="light" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(tabs)" />
-          </Stack>
+          <NavigationGate />
         </SyncProvider>
       </AuthProvider>
     </DatabaseProvider>

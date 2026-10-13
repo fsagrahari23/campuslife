@@ -1,9 +1,19 @@
 import { Router, Request, Response } from 'express';
 import { validate } from '../middleware/validate';
-import { loginSchema, refreshTokenSchema } from '@gatepass/validation';
+import { loginSchema, registerSchema, refreshTokenSchema } from '@gatepass/validation';
 import * as authService from '../services/auth.service';
 
 const router = Router();
+
+// POST /api/auth/register
+router.post('/register', validate(registerSchema), async (req: Request, res: Response) => {
+  try {
+    const result = await authService.register(req.body);
+    res.status(201).json(result);
+  } catch (error) {
+    res.status(400).json({ error: 'Registration Failed', message: (error as Error).message });
+  }
+});
 
 // POST /api/auth/login
 router.post('/login', validate(loginSchema), async (req: Request, res: Response) => {

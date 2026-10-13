@@ -12,10 +12,16 @@
     "dev:student": "npm run start --workspace=apps/student",
     "dev:guard": "npm run start --workspace=apps/guard",
     "build:server": "npm run build --workspace=server",
+    "build:student": "npm run build:preview --workspace=apps/student",
+    "build:guard": "npm run build:preview --workspace=apps/guard",
+    "build:student:prod": "npm run build:prod --workspace=apps/student",
+    "build:guard:prod": "npm run build:prod --workspace=apps/guard",
     "db:migrate": "npm run migrate --workspace=server",
     "db:seed": "npm run seed --workspace=server",
     "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down"
+    "docker:down": "docker-compose down",
+    "tunnel:ngrok": "ngrok http 3000",
+    "tunnel:localtunnel": "npx localtunnel --port 3000"
   },
   "dependencies": {
     "@noble/hashes": "^2.3.0"

@@ -1,10 +1,72 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config';
-import { query, queryOne } from '../config/database';
+import { query, queryOne, withTransaction } from '../config/database';
 import { TokenPayload, LoginResponse, UserRole } from '@gatepass/shared-types';
+import { RegisterInput } from '@gatepass/validation';
 
 const SALT_ROUNDS = 12;
+
+/**
+ * Register a new student account.
+ */
+export async function register(data: RegisterInput): Promise<LoginResponse> {
+  const existingUser = await queryOne('SELECT id FROM users WHERE email = $1', [data.email]);
+  if (existingUser) {
+    throw new Error('An account with this email already exists');
+  }
+
+  const existingRoll = await queryOne('SELECT id FROM students WHERE roll_number = $1', [data.rollNumber]);
+  if (existingRoll) {
+    throw new Error('An account with this roll number already exists');
+  }
+
+  const passwordHash = await hashPassword(data.password);
+  const userId = uuidv4();
+  const studentId = uuidv4();
+  const now = new Date().toISOString();
+
+  return withTransaction(async (client) => {
+    const userRes = await client.query(
+      `INSERT INTO users (id, email, password_hash, role, created_at, updated_at)
+       VALUES ($1, $2, $3, 'student', $4, $4)
+       RETURNING id, email, role, created_at, updated_at`,
+      [userId, data.email, passwordHash, now]
+    );
+
+    const studentRes = await client.query(
+      `INSERT INTO students (id, user_id, roll_number, name, department, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [studentId, userId, data.rollNumber, data.name, data.department || null, now]
+    );
+
+    const user = userRes.rows[0];
+    const student = studentRes.rows[0];
+
+    const tokenPayload: TokenPayload = { userId: user.id, role: 'student' };
+    const accessToken = jwt.sign(tokenPayload, config.jwt.secret, {
+      expiresIn: config.jwt.expiresIn,
+    } as jwt.SignOptions);
+    const refreshToken = jwt.sign(tokenPayload, config.jwt.refreshSecret, {
+      expiresIn: config.jwt.refreshExpiresIn,
+    } as jwt.SignOptions);
+
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        createdAt: user.created_at,
+        updatedAt: user.updated_at,
+      },
+      profile: formatProfile(student, 'student'),
+    };
+  });
+}
 
 /**
  * Authenticate user and return JWT tokens.

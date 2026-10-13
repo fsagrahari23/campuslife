@@ -2,8 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = 'http://localhost:3000/api';
+import { API_URL } from '../constants/api';
 
 const storage = {
   getItem: async (key: string): Promise<string | null> => {
@@ -30,13 +29,14 @@ interface AuthContextType {
   user: any;
   profile: any;
   isAuthenticated: boolean;
+  isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   getToken: () => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextType>({
-  user: null, profile: null, isAuthenticated: false,
+  user: null, profile: null, isAuthenticated: false, isLoading: true,
   login: async () => {}, logout: async () => {}, getToken: async () => null,
 });
 
@@ -46,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => { loadStoredAuth(); }, []);
 
@@ -60,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAuthenticated(true);
       }
     } catch (error) { console.error('Auth load error:', error); }
+    finally { setIsLoading(false); }
   };
 
   const login = async (email: string, password: string) => {
@@ -69,6 +71,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     if (!response.ok) { const data = await response.json(); throw new Error(data.message || 'Login failed'); }
     const data = await response.json();
+
+    if (data.user?.role !== 'guard' && data.user?.role !== 'admin') {
+      throw new Error('Access denied: Only security guards can access this application.');
+    }
+
     await storage.setItem('accessToken', data.accessToken);
     await storage.setItem('refreshToken', data.refreshToken);
     await storage.setItem('user', JSON.stringify(data.user));

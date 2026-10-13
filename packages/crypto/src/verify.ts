@@ -12,7 +12,7 @@ import { canonicalizePayload } from './sign';
 
 // Provide pure JS SHA-512 implementation so crypto.subtle is not required on React Native / HTTP web
 ed.etc.sha512Sync = (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
-ed.etc.sha512Async = (...m: Uint8Array[]) => Promise.resolve(ed.etc.sha512Sync(...m));
+ed.etc.sha512Async = (...m: Uint8Array[]) => Promise.resolve(sha512(ed.etc.concatBytes(...m)));
 
 export interface VerificationResult {
   valid: boolean;

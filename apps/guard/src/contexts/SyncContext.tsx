@@ -7,8 +7,7 @@ import { isValidTransition } from '@gatepass/validation';
 import { ScanVerificationResult, GatePassStatus } from '@gatepass/shared-types';
 
 import { DEFAULT_PUBLIC_KEY } from '../constants/publicKey';
-
-const API_URL = 'http://localhost:3000/api';
+import { API_URL } from '../constants/api';
 
 // Initialized with build-time public key for instant offline verification
 let PUBLIC_KEY = DEFAULT_PUBLIC_KEY;
@@ -41,33 +40,49 @@ export function useSync() { return useContext(SyncContext); }
 
 export function SyncProvider({ children }: { children: ReactNode }) {
   const { db, isReady } = useDatabase();
-  const { getToken, profile } = useAuth();
-  const [isOnline, setIsOnline] = useState(false);
+  const { getToken, profile, isAuthenticated } = useAuth();
+  const [isOnline, setIsOnline] = useState(true);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [recentScans, setRecentScans] = useState<any[]>([]);
   const [pendingEvents, setPendingEvents] = useState<any[]>([]);
+  const activeScansRef = React.useRef<Set<string>>(new Set());
 
   // Network monitoring
   useEffect(() => {
     const check = async () => {
       try {
+        if (Platform.OS === 'web' && typeof navigator !== 'undefined') {
+          setIsOnline(navigator.onLine !== false);
+          return;
+        }
         const state = await Network.getNetworkStateAsync();
         setIsOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
-      } catch { setIsOnline(false); }
+      } catch {
+        setIsOnline(true);
+      }
     };
     check();
-    const interval = setInterval(check, 5000);
+    const interval = setInterval(check, 3000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
     if (isReady && db) { loadData(); }
-  }, [isReady, db]);
+  }, [isReady, db, profile]);
 
+  // Auto-sync when coming online, logging in, or on a 5-second interval
   useEffect(() => {
-    if (isOnline && isReady && db) { syncNow(); }
-  }, [isOnline, isReady]);
+    if (isReady && db && isAuthenticated) {
+      syncNow();
+      const interval = setInterval(() => {
+        if (isOnline) {
+          syncNow();
+        }
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [isOnline, isReady, db, isAuthenticated]);
 
   const loadData = async () => {
     if (!db) return;
@@ -105,12 +120,20 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const deviceId = 'guard-device-' + (profile?.id || 'unknown');
 
+    let passIdLocked: string | null = null;
+
     try {
       // 1. Decode QR payload
       const signedPayload = decodeQRPayload(qrData);
       if (!signedPayload) {
         return saveScanResult(db, scanId, eventId, '', deviceId, scanType, 'INVALID', null, 'Invalid QR code format', now);
       }
+
+      passIdLocked = signedPayload.passId;
+      if (activeScansRef.current.has(signedPayload.passId)) {
+        return { valid: false, errorMessage: 'Scan already in progress for this pass' };
+      }
+      activeScansRef.current.add(signedPayload.passId);
 
       // 2. Verify Ed25519 signature (completely offline)
       if (PUBLIC_KEY) {
@@ -194,9 +217,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const eventType = scanType === 'OUTGOING' ? 'GATE_OUT' : 'GATE_IN';
       await db.runAsync(
         `INSERT INTO outbox_events (id, event_id, event_type, aggregate_id, payload, sync_status, created_at)
-         VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [generateUUID(), eventId, eventType, signedPayload.passId,
          JSON.stringify({ guardId: profile?.id, passId: signedPayload.passId, deviceId, timestamp: now }),
+         'PENDING',
          now]
       );
 
@@ -206,6 +230,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Scan processing error:', error);
       return { valid: false, errorMessage: error instanceof Error ? error.message : 'Scan processing failed' };
+    } finally {
+      if (passIdLocked) {
+        activeScansRef.current.delete(passIdLocked);
+      }
     }
   };
 
@@ -237,15 +265,32 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
       if (pending.length > 0) {
         const deviceId = 'guard-device-' + (profile?.id || 'unknown');
-        const events = pending.map((e: any) => ({
-          eventId: e.event_id, eventType: e.event_type,
-          aggregateId: e.aggregate_id, payload: JSON.parse(e.payload), timestamp: e.created_at,
-        }));
+        const events = pending.map((e: any) => {
+          let payload = e.payload;
+          if (typeof payload === 'string') {
+            try {
+              payload = JSON.parse(payload);
+            } catch {
+              // keep as is if string
+            }
+          }
+          return {
+            eventId: e.event_id,
+            eventType: e.event_type,
+            aggregateId: e.aggregate_id,
+            payload: typeof payload === 'object' && payload !== null ? payload : { raw: payload },
+            timestamp: e.created_at,
+          };
+        });
 
         try {
           const res = await fetch(`${API_URL}/sync/push`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            headers: {
+              'Content-Type': 'application/json',
+              'ngrok-skip-browser-warning': 'true',
+              Authorization: `Bearer ${token}`,
+            },
             body: JSON.stringify({ deviceId, events }),
           });
 
@@ -266,7 +311,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
         const res = await fetch(`${API_URL}/sync/pull`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          headers: {
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ deviceId: 'guard-device-' + (profile?.id || 'unknown'), lastSyncVersion }),
         });
 

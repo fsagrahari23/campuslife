@@ -2,8 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = 'http://localhost:3000/api';
+import { API_URL } from '../constants/api';
 
 const storage = {
   getItem: async (key: string): Promise<string | null> => {
@@ -30,7 +29,9 @@ interface AuthContextType {
   user: any;
   profile: any;
   isAuthenticated: boolean;
+  isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  register: (data: { email: string; password: string; name: string; rollNumber: string; department?: string }) => Promise<void>;
   logout: () => Promise<void>;
   getToken: () => Promise<string | null>;
 }
@@ -39,7 +40,9 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   isAuthenticated: false,
+  isLoading: true,
   login: async () => {},
+  register: async () => {},
   logout: async () => {},
   getToken: async () => null,
 });
@@ -52,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     loadStoredAuth();
@@ -70,6 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error('Error loading stored auth:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -87,6 +93,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const data = await response.json();
 
+    if (data.user?.role !== 'student' && data.user?.role !== 'admin') {
+      throw new Error('Access denied: Only students can access this application.');
+    }
+
     // Store tokens securely
     await storage.setItem('accessToken', data.accessToken);
     await storage.setItem('refreshToken', data.refreshToken);
@@ -95,6 +105,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setUser(data.user);
     setProfile(data.profile);
+    setIsAuthenticated(true);
+  };
+
+  const register = async (data: { email: string; password: string; name: string; rollNumber: string; department?: string }) => {
+    const response = await fetch(`${API_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const resData = await response.json();
+      throw new Error(resData.message || 'Registration failed');
+    }
+
+    const resData = await response.json();
+
+    // Store tokens securely
+    await storage.setItem('accessToken', resData.accessToken);
+    await storage.setItem('refreshToken', resData.refreshToken);
+    await storage.setItem('user', JSON.stringify(resData.user));
+    await storage.setItem('profile', JSON.stringify(resData.profile));
+
+    setUser(resData.user);
+    setProfile(resData.profile);
     setIsAuthenticated(true);
   };
 
@@ -114,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, isAuthenticated, login, logout, getToken }}>
+    <AuthContext.Provider value={{ user, profile, isAuthenticated, login, register, logout, getToken }}>
       {children}
     </AuthContext.Provider>
   );

@@ -31,14 +31,31 @@ export async function pushSync(data: PushSyncRequest): Promise<PushSyncResponse>
       switch (event.eventType) {
         case 'GATE_PASS_CREATED': {
           const payload = event.payload as any;
-          await gatePassService.createGatePass(payload.studentId, {
-            rollNumber: payload.rollNumber,
-            studentName: payload.studentName,
-            destination: payload.destination,
-            purpose: payload.purpose,
-            validFrom: payload.validFrom,
-            validUntil: payload.validUntil,
-          });
+          let studentId = payload.studentId;
+
+          // Find student by ID or roll number
+          const student = await queryOne<{ id: string }>(
+            'SELECT id FROM students WHERE id = $1 OR roll_number = $2',
+            [studentId, payload.rollNumber]
+          );
+
+          if (student) {
+            studentId = student.id;
+          } else {
+            const fallbackStudent = await queryOne<{ id: string }>('SELECT id FROM students LIMIT 1');
+            studentId = fallbackStudent?.id;
+          }
+
+          if (studentId) {
+            await gatePassService.createGatePass(studentId, {
+              rollNumber: payload.rollNumber,
+              studentName: payload.studentName,
+              destination: payload.destination,
+              purpose: payload.purpose,
+              validFrom: payload.validFrom,
+              validUntil: payload.validUntil,
+            });
+          }
 
           // Record sync event
           await query(

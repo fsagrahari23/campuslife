@@ -14,10 +14,43 @@ export function useDatabase() { return useContext(DatabaseContext); }
 function createFallbackDatabase(prefix: string) {
   const storeKey = `@sqlite_fallback_${prefix}`;
 
+  const VALID_EVENT_TYPES = new Set([
+    'GATE_PASS_CREATED', 'GATE_PASS_APPROVED', 'GATE_PASS_REJECTED',
+    'GATE_PASS_CANCELLED', 'GATE_PASS_EXPIRED', 'GATE_OUT', 'GATE_IN', 'DEVICE_SYNCED'
+  ]);
+
   const getTables = async (): Promise<Record<string, any[]>> => {
     try {
       const data = await AsyncStorage.getItem(storeKey);
-      return data ? JSON.parse(data) : { local_gate_passes: [], local_scan_events: [], outbox_events: [], revocations: [], sync_metadata: [] };
+      if (!data) return { local_gate_passes: [], local_scan_events: [], outbox_events: [], revocations: [], sync_metadata: [] };
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed.outbox_events)) {
+        parsed.outbox_events = parsed.outbox_events.map((e: any) => {
+          let eventType = e.event_type;
+          let aggregateId = e.aggregate_id;
+          let payload = e.payload;
+          let createdAt = e.created_at;
+
+          if (!VALID_EVENT_TYPES.has(eventType)) {
+            eventType = 'GATE_OUT';
+            if (typeof aggregateId === 'string' && aggregateId.startsWith('{')) {
+              payload = aggregateId;
+              aggregateId = e.event_type || e.id;
+            }
+          }
+          if (!createdAt || typeof createdAt !== 'string' || !createdAt.includes('T')) {
+            createdAt = new Date().toISOString();
+          }
+          return {
+            ...e,
+            event_type: eventType,
+            aggregate_id: aggregateId,
+            payload,
+            created_at: createdAt,
+          };
+        });
+      }
+      return parsed;
     } catch {
       return { local_gate_passes: [], local_scan_events: [], outbox_events: [], revocations: [], sync_metadata: [] };
     }
@@ -37,23 +70,89 @@ function createFallbackDatabase(prefix: string) {
       const tables = await getTables();
       const upper = sql.trim().toUpperCase();
 
-      if (upper.startsWith('INSERT INTO LOCAL_GATE_PASSES')) {
-        const [id, student_id, roll_number, student_name, destination, purpose, valid_from, valid_until, signature, version, updated_at] = params;
+      if (upper.startsWith('INSERT INTO LOCAL_GATE_PASSES') || upper.startsWith('INSERT OR REPLACE INTO LOCAL_GATE_PASSES')) {
         tables.local_gate_passes = tables.local_gate_passes || [];
-        const idx = tables.local_gate_passes.findIndex(p => p.id === id);
-        const row = { id, student_id, roll_number, student_name, destination, purpose, valid_from, valid_until, status: 'APPROVED', signature, version, updated_at };
-        if (idx >= 0) tables.local_gate_passes[idx] = row;
-        else tables.local_gate_passes.unshift(row);
+        if (params.length === 11) {
+          const [id, student_id, roll_number, student_name, destination, purpose, valid_from, valid_until, signature, version, updated_at] = params;
+          const idx = tables.local_gate_passes.findIndex(p => p.id === id);
+          const row = { id, student_id, roll_number, student_name, destination, purpose, valid_from, valid_until, status: 'APPROVED', signature, version, updated_at };
+          if (idx >= 0) tables.local_gate_passes[idx] = row;
+          else tables.local_gate_passes.unshift(row);
+        } else if (params.length >= 12) {
+          const [id, student_id, roll_number, student_name, destination, purpose, valid_from, valid_until, status, signature, version, updated_at] = params;
+          const idx = tables.local_gate_passes.findIndex(p => p.id === id);
+          const row = { id, student_id, roll_number, student_name, destination, purpose, valid_from, valid_until, status, signature, version, updated_at };
+          if (idx >= 0) tables.local_gate_passes[idx] = row;
+          else tables.local_gate_passes.unshift(row);
+        }
+        await saveTables(tables);
+      } else if (upper.startsWith('UPDATE LOCAL_GATE_PASSES')) {
+        tables.local_gate_passes = tables.local_gate_passes || [];
+        const passId = params[params.length - 1];
+        const pass = tables.local_gate_passes.find(p => p.id === passId);
+        if (pass) {
+          if (params.length >= 2) {
+            pass.status = params[0];
+            pass.updated_at = params[1] || new Date().toISOString();
+          }
+        }
         await saveTables(tables);
       } else if (upper.startsWith('INSERT INTO LOCAL_SCAN_EVENTS')) {
         const [id, event_id, pass_id, device_id, guard_id, scan_type, result, student_name, roll_number, destination, previous_status, new_status, error_message, timestamp, sync_status, created_at] = params;
         tables.local_scan_events = tables.local_scan_events || [];
         tables.local_scan_events.unshift({ id, event_id, pass_id, device_id, guard_id, scan_type, result, student_name, roll_number, destination, previous_status, new_status, error_message, timestamp, sync_status, created_at });
         await saveTables(tables);
+      } else if (upper.startsWith('UPDATE LOCAL_SCAN_EVENTS')) {
+        tables.local_scan_events = tables.local_scan_events || [];
+        const eventId = params[params.length - 1];
+        const item = tables.local_scan_events.find(e => e.event_id === eventId);
+        if (item) item.sync_status = 'SYNCED';
+        await saveTables(tables);
       } else if (upper.startsWith('INSERT INTO OUTBOX_EVENTS')) {
-        const [id, event_id, event_type, aggregate_id, payload, sync_status, created_at] = params;
+        let id, event_id, event_type, aggregate_id, payload, sync_status, created_at;
+        if (params.length === 7) {
+          [id, event_id, event_type, aggregate_id, payload, sync_status, created_at] = params;
+        } else if (params.length === 6) {
+          [id, event_id, event_type, aggregate_id, payload, created_at] = params;
+          sync_status = 'PENDING';
+        } else if (params.length === 5) {
+          [id, event_id, aggregate_id, payload, created_at] = params;
+          event_type = 'GATE_OUT';
+          sync_status = 'PENDING';
+        }
         tables.outbox_events = tables.outbox_events || [];
-        tables.outbox_events.unshift({ id, event_id, event_type, aggregate_id, payload, sync_status, created_at });
+        tables.outbox_events.unshift({
+          id,
+          event_id,
+          event_type: event_type || 'GATE_OUT',
+          aggregate_id,
+          payload,
+          sync_status: sync_status || 'PENDING',
+          created_at: created_at || new Date().toISOString()
+        });
+        await saveTables(tables);
+        await saveTables(tables);
+      } else if (upper.startsWith('UPDATE OUTBOX_EVENTS')) {
+        tables.outbox_events = tables.outbox_events || [];
+        const eventId = params[params.length - 1];
+        const item = tables.outbox_events.find(e => e.event_id === eventId);
+        if (item) item.sync_status = 'SYNCED';
+        await saveTables(tables);
+      } else if (upper.startsWith('INSERT OR REPLACE INTO REVOCATIONS') || upper.startsWith('INSERT INTO REVOCATIONS')) {
+        const [id, pass_id, reason, revoked_at, version] = params;
+        tables.revocations = tables.revocations || [];
+        const idx = tables.revocations.findIndex(r => r.pass_id === pass_id);
+        const row = { id, pass_id, reason, revoked_at, version };
+        if (idx >= 0) tables.revocations[idx] = row;
+        else tables.revocations.unshift(row);
+        await saveTables(tables);
+      } else if (upper.startsWith('INSERT OR REPLACE INTO SYNC_METADATA') || upper.startsWith('INSERT INTO SYNC_METADATA')) {
+        const [key, value, updated_at] = params.length === 2 ? ['lastSyncVersion', params[0], params[1]] : params;
+        tables.sync_metadata = tables.sync_metadata || [];
+        const idx = tables.sync_metadata.findIndex(m => m.key === key);
+        const row = { key, value, updated_at };
+        if (idx >= 0) tables.sync_metadata[idx] = row;
+        else tables.sync_metadata.push(row);
         await saveTables(tables);
       }
       return { changes: 1, lastInsertRowId: 1 };
@@ -66,6 +165,9 @@ function createFallbackDatabase(prefix: string) {
       }
       if (upper.includes('LOCAL_GATE_PASSES')) {
         return (tables.local_gate_passes || []) as T[];
+      }
+      if (upper.includes('OUTBOX_EVENTS')) {
+        return (tables.outbox_events || []) as T[];
       }
       return [] as T[];
     },
@@ -83,6 +185,10 @@ function createFallbackDatabase(prefix: string) {
       if (upper.includes('COUNT(*)') && upper.includes('OUTBOX_EVENTS')) {
         const pending = (tables.outbox_events || []).filter(e => e.sync_status === 'PENDING').length;
         return { count: pending } as T;
+      }
+      if (upper.includes('SYNC_METADATA')) {
+        const key = params[0] || 'lastSyncVersion';
+        return (tables.sync_metadata?.find(m => m.key === key) || null) as T | null;
       }
       return null;
     },

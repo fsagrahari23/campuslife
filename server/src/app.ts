@@ -15,6 +15,8 @@ import deviceRoutes from './routes/device.routes';
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet());
 app.use(cors());
@@ -32,10 +34,11 @@ app.use('/api/', limiter);
 // Stricter rate limit for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 60000,
-  max: 5,
-  message: { error: 'Too Many Requests', message: 'Too many login attempts' },
+  max: 10,
+  message: { error: 'Too Many Requests', message: 'Too many authentication attempts, please wait a minute.' },
 });
 app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 
 // Health check
 app.get('/api/health', (_req, res) => {

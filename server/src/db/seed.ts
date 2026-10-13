@@ -14,7 +14,6 @@ async function seed() {
     const existing = await query('SELECT id FROM users LIMIT 1');
     if (existing.length > 0) {
       console.log('Database already has data. Skipping seed.');
-      await pool.end();
       return;
     }
 
